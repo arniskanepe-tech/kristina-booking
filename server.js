@@ -265,7 +265,7 @@ app.get("/availability", (req, res) => {
   }
 });
 
-app.get("/slots", (req, res) => {
+app.get("/slots", async (req, res) => {
   try {
     const { serviceId, date } = req.query;
 
@@ -311,22 +311,30 @@ app.get("/slots", (req, res) => {
       return startA < endB && endA > startB;
     }
 
-    const freeSlots = allSlots.filter(slot => {
-      const slotStart = getDateTime(date, slot);
-      const slotEnd = new Date(slotStart.getTime() + selectedService.duration * 60 * 1000);
+const googleBusy = await getGoogleBusyIntervals(date);
 
-      const hasConflict = bookings.some(booking => {
-        if (booking.date !== date) return false;
+   const freeSlots = allSlots.filter(slot => {
+  const slotStart = getDateTime(date, slot);
+  const slotEnd = new Date(slotStart.getTime() + selectedService.duration * 60 * 1000);
 
-        const bookedDuration = getServiceDurationByName(booking.service);
-        const bookingStart = getDateTime(booking.date, booking.time);
-        const bookingEnd = new Date(bookingStart.getTime() + bookedDuration * 60 * 1000);
+  // 1. Lokālie bookingi
+  const hasLocalConflict = bookings.some(booking => {
+    if (booking.date !== date) return false;
 
-        return overlaps(slotStart, slotEnd, bookingStart, bookingEnd);
-      });
+    const bookedDuration = getServiceDurationByName(booking.service);
+    const bookingStart = getDateTime(booking.date, booking.time);
+    const bookingEnd = new Date(bookingStart.getTime() + bookedDuration * 60 * 1000);
 
-      return !hasConflict;
-    });
+    return overlaps(slotStart, slotEnd, bookingStart, bookingEnd);
+  });
+
+  // 2. Google Calendar
+  const hasGoogleConflict = googleBusy.some(event => {
+    return overlaps(slotStart, slotEnd, event.start, event.end);
+  });
+
+  return !hasLocalConflict && !hasGoogleConflict;
+});
 
     res.json(freeSlots);
 
@@ -372,13 +380,67 @@ app.put("/availability/:index", (req, res) => {
 // admin rezervāciju saraksts
 app.get("/bookings", (req, res) => {
   try {
-    const bookings = loadBookings();
+    const bookings = loadBookings().map((booking, index) => ({
+      ...booking,
+      index
+    }));
+
     res.json(bookings);
   } catch (err) {
     console.error("Kļūda nolasot bookings:", err);
-    res.status(500).json({ status: "error", message: "Neizdevās nolasīt rezervācijas." });
+    res.status(500).json({
+      status: "error",
+      message: "Neizdevās nolasīt rezervācijas."
+    });
   }
 });
+
+app.delete("/bookings/:index", async (req, res) => {
+  try {
+    const index = Number(req.params.index);
+    const bookings = loadBookings();
+
+    if (index < 0 || index >= bookings.length) {
+      return res.status(404).json({
+        status: "error",
+        message: "Booking nav atrasts"
+      });
+    }
+
+    const deletedBooking = bookings[index];
+
+    if (deletedBooking.eventId) {
+      try {
+        const auth = await authorize();
+        const calendar = google.calendar({ version: "v3", auth });
+
+        await calendar.events.delete({
+          calendarId: "primary",
+          eventId: deletedBooking.eventId
+        });
+
+        console.log("Dzēsts Google Calendar event:", deletedBooking.eventId);
+      } catch (calendarErr) {
+        console.error("Kļūda dzēšot Google Calendar event:", calendarErr);
+      }
+    }
+
+    bookings.splice(index, 1);
+    saveBookings(bookings);
+
+    res.json({
+      status: "ok",
+      deletedBooking
+    });
+  } catch (err) {
+    console.error("Kļūda dzēšot booking:", err);
+    res.status(500).json({
+      status: "error",
+      message: "Neizdevās izdzēst booking"
+    });
+  }
+});
+
 
 // booking route
 app.post("/booking", async (req, res) => {
@@ -387,21 +449,13 @@ app.post("/booking", async (req, res) => {
 
     const bookings = loadBookings();
 
-    bookings.push({
-      ...newBooking,
-      createdAt: new Date().toISOString()
-    });
+const auth = await authorize();
+const calendar = google.calendar({ version: "v3", auth });
 
-    saveBookings(bookings);
-    console.log("Saglabāts booking:", newBooking);
+const startDate = new Date(`${newBooking.date}T${newBooking.time}:00`);
+const endDate = getEndDateTime(newBooking.date, newBooking.time, newBooking.service);
 
-    const auth = await authorize();
-    const calendar = google.calendar({ version: "v3", auth });
-
-    const startDate = new Date(`${newBooking.date}T${newBooking.time}:00`);
-    const endDate = getEndDateTime(newBooking.date, newBooking.time, newBooking.service);
-
-    const event = await calendar.events.insert({
+const event = await calendar.events.insert({
       calendarId: "primary",
       resource: {
         summary: newBooking.service,
@@ -420,12 +474,23 @@ app.post("/booking", async (req, res) => {
       }
     });
 
-    console.log("Event added to Google Calendar");
+    const savedBooking = {
+  ...newBooking,
+  createdAt: new Date().toISOString(),
+  eventId: event.data.id || null
+};
 
-    res.json({
-      status: "ok",
-      eventLink: event.data.htmlLink || null
-    });
+bookings.push(savedBooking);
+saveBookings(bookings);
+
+console.log("Saglabāts booking:", savedBooking);
+console.log("Event added to Google Calendar");
+
+res.json({
+  status: "ok",
+  eventLink: event.data.htmlLink || null
+});
+
   } catch (err) {
     console.error("Calendar/server error:", err);
     res.status(500).json({

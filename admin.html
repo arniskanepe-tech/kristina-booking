@@ -45,18 +45,19 @@
       </div>
 
       <table id="bookings-table">
-        <thead>
-          <tr>
-            <th>Pakalpojums</th>
-            <th>Datums</th>
-            <th>Laiks</th>
-            <th>Vārds</th>
-            <th>E-pasts</th>
-            <th>Telefons</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
+  <thead>
+    <tr>
+      <th>Pakalpojums</th>
+      <th>Datums</th>
+      <th>Laiks</th>
+      <th>Vārds</th>
+      <th>E-pasts</th>
+      <th>Telefons</th>
+      <th>Darbības</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
     </section>
   </div>
 
@@ -378,18 +379,41 @@
       });
 
       filtered.forEach(b => {
-        tbody.innerHTML += `
-          <tr>
-            <td>${escapeHtml(b.service)}</td>
-            <td>${escapeHtml(b.date)}</td>
-            <td>${escapeHtml(b.time)}</td>
-            <td>${escapeHtml(b.name)}</td>
-            <td>${escapeHtml(b.email)}</td>
-            <td>${escapeHtml(b.phone)}</td>
-          </tr>
-        `;
-      });
+  tbody.innerHTML += `
+    <tr>
+      <td>${escapeHtml(b.service)}</td>
+      <td>${escapeHtml(b.date)}</td>
+      <td>${escapeHtml(b.time)}</td>
+      <td>${escapeHtml(b.name)}</td>
+      <td>${escapeHtml(b.email)}</td>
+      <td>${escapeHtml(b.phone)}</td>
+      <td>
+        <button type="button" onclick="deleteBooking(${b.index})">Dzēst</button>
+      </td>
+    </tr>
+  `;
+});
     }
+
+    async function deleteBooking(index) {
+  const confirmDelete = confirm("Vai tiešām dzēst šo rezervāciju?");
+  if (!confirmDelete) return;
+
+  const response = await fetch(`/bookings/${index}`, {
+    method: "DELETE"
+  });
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    alert("Neizdevās izdzēst: " + (result.message || "kļūda"));
+    return;
+  }
+
+  await loadBookings();
+}
+
+
 
     document.getElementById("booking-search").addEventListener("input", renderBookings);
     document.getElementById("booking-sort").addEventListener("change", renderBookings);
