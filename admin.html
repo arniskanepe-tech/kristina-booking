@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="lv">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Admin panelis</title>
+  <link rel="stylesheet" href="assets/css/admin.css">
+</head>
+<body>
+
+  <div class="admin-shell">
+    <h1>Admin panelis</h1>
+
+    <section class="section-block">
+      <h2>Pakalpojumi</h2>
+
+      <table id="services-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Nosaukums</th>
+            <th>Ilgums</th>
+            <th>Darbības</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section class="section-block">
+      <h2>Rezervācijas</h2>
+
+      <div class="booking-tools">
+        <input type="text" id="booking-search" placeholder="Meklēt rezervācijās...">
+        <select id="booking-sort">
+          <option value="createdAt-desc">Jaunākās vispirms</option>
+          <option value="createdAt-asc">Vecākās vispirms</option>
+          <option value="date-asc">Datums augošā secībā</option>
+          <option value="date-desc">Datums dilstošā secībā</option>
+          <option value="service-asc">Pakalpojums A–Z</option>
+          <option value="service-desc">Pakalpojums Z–A</option>
+          <option value="name-asc">Vārds A–Z</option>
+          <option value="name-desc">Vārds Z–A</option>
+        </select>
+      </div>
+
+      <table id="bookings-table">
+        <thead>
+          <tr>
+            <th>Pakalpojums</th>
+            <th>Datums</th>
+            <th>Laiks</th>
+            <th>Vārds</th>
+            <th>E-pasts</th>
+            <th>Telefons</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </div>
+
+  <script>
+    let currentOpenServiceId = null;
+    let bookingsCache = [];
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function getDayNameShort(index) {
+      const days = ["Sv", "Pr", "Ot", "Tr", "Ce", "Pk", "Se"];
+      return days[index] || "";
+    }
+
+    function toggleDayInputs(day) {
+      const active = document.getElementById(`active-${day}`).checked;
+      const fromInput = document.getElementById(`from-${day}`);
+      const toInput = document.getElementById(`to-${day}`);
+
+      if (!fromInput || !toInput) return;
+
+      fromInput.disabled = !active;
+      toInput.disabled = !active;
+
+      if (active) {
+        if (!fromInput.value) fromInput.value = "09:00";
+        if (!toInput.value) toInput.value = "21:00";
+      }
+    }
+
+    async function loadServices() {
+      const response = await fetch("/services", { cache: "no-store" });
+      const services = await response.json();
+
+      const tbody = document.querySelector("#services-table tbody");
+      tbody.innerHTML = "";
+
+      services.forEach(service => {
+        const isOpen = currentOpenServiceId === service.id;
+
+        tbody.innerHTML += `
+          <tr class="${isOpen ? "service-row is-open" : "service-row"}">
+            <td>${service.id}</td>
+            <td>${escapeHtml(service.name)}</td>
+            <td>${service.duration} min</td>
+            <td>
+              <button
+                class="${isOpen ? "btn-secondary" : ""}"
+                onclick="${isOpen ? `closeServiceConfig()` : `showServiceConfig(${service.id})`}"
+              >
+                ${isOpen ? "Aizvērt" : "Atvērt"}
+              </button>
+            </td>
+          </tr>
+        `;
+
+        if (isOpen) {
+          tbody.innerHTML += `
+            <tr class="service-config-row">
+              <td colspan="4" class="config-cell">
+                <div id="service-inline-config"></div>
+              </td>
+            </tr>
+          `;
+        }
+      });
+
+      if (currentOpenServiceId !== null) {
+        await renderInlineServiceConfig(currentOpenServiceId);
+      }
+    }
+
+    function closeServiceConfig() {
+      currentOpenServiceId = null;
+      loadServices();
+    }
+
+    async function showServiceConfig(serviceId) {
+      currentOpenServiceId = serviceId;
+      await loadServices();
+
+      const target = document.getElementById("service-inline-config");
+      if (target) {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
+
+    async function renderInlineServiceConfig(serviceId) {
+      const container = document.getElementById("service-inline-config");
+      if (!container) return;
+
+      const servicesRes = await fetch("/services", { cache: "no-store" });
+      const services = await servicesRes.json();
+
+      const availabilityRes = await fetch("/availability");
+      const availability = await availabilityRes.json();
+
+      const service = services.find(s => s.id === serviceId);
+      if (!service) {
+        container.innerHTML = "<p>Serviss nav atrasts.</p>";
+        return;
+      }
+
+      const serviceAvailability = availability.filter(a => a.serviceId === serviceId);
+
+      let daysHtml = "";
+
+      for (let day = 0; day <= 6; day++) {
+        const a = serviceAvailability.find(x => x.weekday === day);
+
+        const isActive = a ? a.active : false;
+        const fromValue = (a && a.from && a.from.includes(":")) ? a.from : "09:00";
+        const toValue = (a && a.to && a.to.includes(":")) ? a.to : "21:00";
+
+        daysHtml += `
+          <tr>
+            <td>${getDayNameShort(day)}</td>
+            <td>
+              <input
+                type="checkbox"
+                id="active-${day}"
+                ${isActive ? "checked" : ""}
+                onchange="toggleDayInputs(${day})"
+              >
+            </td>
+            <td>
+              <input
+                type="time"
+                id="from-${day}"
+                value="${fromValue}"
+                ${isActive ? "" : "disabled"}
+              >
+            </td>
+            <td>
+              <input
+                type="time"
+                id="to-${day}"
+                value="${toValue}"
+                ${isActive ? "" : "disabled"}
+              >
+            </td>
+          </tr>
+        `;
+      }
+
+      container.innerHTML = `
+        <div class="config-sticky-bar">
+          <div class="config-sticky-main">
+            <div class="config-sticky-meta">
+              <div class="config-id-badge">#${service.id}</div>
+              <div class="config-sticky-name">${escapeHtml(service.name)}</div>
+            </div>
+
+            <div class="config-sticky-fields">
+              <div class="compact-field">
+                <label for="service-name">Nosaukums</label>
+                <input class="inline-input" id="service-name" value="${escapeHtml(service.name)}">
+              </div>
+
+              <div class="compact-field compact-field-duration">
+                <label for="service-duration">Ilgums</label>
+                <div class="duration-inline">
+                  <input class="small-input" id="service-duration" type="number" min="5" step="5" value="${service.duration}">
+                  <span class="duration-unit">min</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="config-sticky-actions">
+              <button onclick="saveServiceConfig(${service.id})">Saglabāt</button>
+              <button class="btn-secondary" onclick="closeServiceConfig()">Aizvērt</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="config-table-wrap">
+          <table class="config-days-table">
+            <thead>
+              <tr>
+                <th>Diena</th>
+                <th>Aktīvs</th>
+                <th>No</th>
+                <th>Līdz</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${daysHtml}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    async function saveServiceConfig(serviceId) {
+  const name = document.getElementById("service-name").value.trim();
+  const duration = Number(document.getElementById("service-duration").value);
+
+  if (!name) {
+    alert("Ievadi pakalpojuma nosaukumu.");
+    return;
+  }
+
+  if (!duration || duration <= 0) {
+    alert("Ievadi korektu ilgumu minūtēs.");
+    return;
+  }
+
+  const serviceResponse = await fetch(`/services/${serviceId}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      name,
+      duration
+    })
+  });
+
+  const serviceResult = await serviceResponse.json();
+
+  if (!serviceResponse.ok) {
+    alert("Service nesaglabājās: " + (serviceResult.message || "nezināma kļūda"));
+    return;
+  }
+
+  const availabilityRes = await fetch("/availability");
+  const availability = await availabilityRes.json();
+  const serviceAvailability = availability.filter(a => a.serviceId === serviceId);
+
+  for (let day = 0; day <= 6; day++) {
+    const existing = serviceAvailability.find(a => a.weekday === day);
+
+    const from = document.getElementById(`from-${day}`).value;
+    const to = document.getElementById(`to-${day}`).value;
+    const active = document.getElementById(`active-${day}`).checked;
+
+    const availabilityIndex = existing ? existing.index : -1;
+
+    const availabilityResponse = await fetch(`/availability/${availabilityIndex}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        serviceId,
+        weekday: day,
+        from,
+        to,
+        active
+      })
+    });
+
+    const availabilityResult = await availabilityResponse.json();
+
+    if (!availabilityResponse.ok) {
+      alert("Pieejamība nesaglabājās: " + (availabilityResult.message || "nezināma kļūda"));
+      return;
+    }
+  }
+
+  await loadServices();
+  alert("Saglabāts");
+}
+
+    async function loadBookings() {
+      const response = await fetch("/bookings");
+      bookingsCache = await response.json();
+      renderBookings();
+    }
+
+    function renderBookings() {
+      const tbody = document.querySelector("#bookings-table tbody");
+      tbody.innerHTML = "";
+
+      const searchValue = document.getElementById("booking-search").value.trim().toLowerCase();
+      const sortValue = document.getElementById("booking-sort").value;
+
+      let filtered = [...bookingsCache];
+
+      if (searchValue) {
+        filtered = filtered.filter(b =>
+          String(b.service || "").toLowerCase().includes(searchValue) ||
+          String(b.date || "").toLowerCase().includes(searchValue) ||
+          String(b.time || "").toLowerCase().includes(searchValue) ||
+          String(b.name || "").toLowerCase().includes(searchValue) ||
+          String(b.email || "").toLowerCase().includes(searchValue) ||
+          String(b.phone || "").toLowerCase().includes(searchValue)
+        );
+      }
+
+      filtered.sort((a, b) => {
+        switch (sortValue) {
+          case "createdAt-asc":
+            return String(a.createdAt || "").localeCompare(String(b.createdAt || ""));
+          case "createdAt-desc":
+            return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+          case "date-asc":
+            return `${a.date || ""} ${a.time || ""}`.localeCompare(`${b.date || ""} ${b.time || ""}`);
+          case "date-desc":
+            return `${b.date || ""} ${b.time || ""}`.localeCompare(`${a.date || ""} ${a.time || ""}`);
+          case "service-asc":
+            return String(a.service || "").localeCompare(String(b.service || ""));
+          case "service-desc":
+            return String(b.service || "").localeCompare(String(a.service || ""));
+          case "name-asc":
+            return String(a.name || "").localeCompare(String(b.name || ""));
+          case "name-desc":
+            return String(b.name || "").localeCompare(String(a.name || ""));
+          default:
+            return 0;
+        }
+      });
+
+      filtered.forEach(b => {
+        tbody.innerHTML += `
+          <tr>
+            <td>${escapeHtml(b.service)}</td>
+            <td>${escapeHtml(b.date)}</td>
+            <td>${escapeHtml(b.time)}</td>
+            <td>${escapeHtml(b.name)}</td>
+            <td>${escapeHtml(b.email)}</td>
+            <td>${escapeHtml(b.phone)}</td>
+          </tr>
+        `;
+      });
+    }
+
+    document.getElementById("booking-search").addEventListener("input", renderBookings);
+    document.getElementById("booking-sort").addEventListener("change", renderBookings);
+
+    loadServices();
+    loadBookings();
+  </script>
+
+</body>
+</html>
