@@ -13,7 +13,7 @@ let frontendPath = "/var/www/kristina/couch";
 
 // ja servera ceļš neeksistē → izmanto lokālo
 if (!fs.existsSync(frontendPath)) {
-  frontendPath = path.join(__dirname, "..", "couch");
+frontendPath = path.join(__dirname, "..", "kristina-couch");
 }
 
 app.use("/kristina", express.static(frontendPath));
