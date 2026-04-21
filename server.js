@@ -8,8 +8,15 @@ const { google } = require("googleapis");
 const app = express();
 
 app.use(express.json());
-app.use(express.static(__dirname));
 
+let frontendPath = "/var/www/kristina/couch";
+
+// ja servera ceļš neeksistē → izmanto lokālo
+if (!fs.existsSync(frontendPath)) {
+  frontendPath = path.join(__dirname, "..", "couch");
+}
+
+app.use("/kristina", express.static(frontendPath));
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -181,9 +188,12 @@ async function getGoogleBusyIntervals(date) {
   }));
 }
 
-// test route
-app.get("/", (req, res) => {
-  res.send("Serveris strādā");
+app.get("/kristina", (req, res) => {
+  res.sendFile(path.join(frontendPath, "index.html"));
+});
+
+app.get("/kristina/", (req, res) => {
+  res.sendFile(path.join(frontendPath, "index.html"));
 });
 
 // services API
@@ -500,6 +510,6 @@ res.json({
   }
 });
 
-app.listen(3000, () => {
+app.listen(3001, () => {
   console.log("Serveris palaists uz http://localhost:3000");
 });
