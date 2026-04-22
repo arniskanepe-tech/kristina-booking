@@ -207,6 +207,16 @@ app.get("/services", (req, res) => {
   }
 });
 
+app.get("/kristina/services", (req, res) => {
+  try {
+    const services = loadServices();
+    res.json(services);
+  } catch (err) {
+    console.error("Kļūda nolasot services:", err);
+    res.status(500).json({ status: "error" });
+  }
+});
+
 app.put("/services/:id", (req, res) => {
   try {
     const serviceId = Number(req.params.id);
@@ -254,7 +264,7 @@ app.put("/services/:id", (req, res) => {
 
 
 
-app.get("/availability", (req, res) => {
+app.get(["/availability", "/kristina/availability"], (req, res) => {
   try {
     const availability = loadAvailability();
     const services = loadServices();
@@ -275,7 +285,7 @@ app.get("/availability", (req, res) => {
   }
 });
 
-app.get("/slots", async (req, res) => {
+app.get(["/slots", "/kristina/slots"], async (req, res) => {
   try {
     const { serviceId, date } = req.query;
 
@@ -388,7 +398,7 @@ app.put("/availability/:index", (req, res) => {
 });
 
 // admin rezervāciju saraksts
-app.get("/bookings", (req, res) => {
+app.get(["/bookings", "/kristina/bookings"], (req, res) => {
   try {
     const bookings = loadBookings().map((booking, index) => ({
       ...booking,
@@ -405,7 +415,7 @@ app.get("/bookings", (req, res) => {
   }
 });
 
-app.delete("/bookings/:index", async (req, res) => {
+app.delete(["/bookings/:index", "/kristina/bookings/:index"], async (req, res) => {
   try {
     const index = Number(req.params.index);
     const bookings = loadBookings();
@@ -453,7 +463,7 @@ app.delete("/bookings/:index", async (req, res) => {
 
 
 // booking route
-app.post("/booking", async (req, res) => {
+app.post(["/booking", "/kristina/booking"], async (req, res) => {
   try {
     const newBooking = req.body;
 
