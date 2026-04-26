@@ -333,10 +333,21 @@ app.get(["/slots", "/kristina/slots"], async (req, res) => {
 
 const googleBusy = await getGoogleBusyIntervals(date);
 
-   const freeSlots = allSlots.filter(slot => {
+  const freeSlots = allSlots.filter(slot => {
   const slotStart = getDateTime(date, slot);
   const slotEnd = new Date(slotStart.getTime() + selectedService.duration * 60 * 1000);
 
+  const now = new Date();
+  const today = new Date();
+  const todayString =
+    today.getFullYear() + "-" +
+    String(today.getMonth() + 1).padStart(2, "0") + "-" +
+    String(today.getDate()).padStart(2, "0");
+
+  if (date === todayString && slotStart <= now) {
+    return false;
+
+  }
   // 1. Lokālie bookingi
   const hasLocalConflict = bookings.some(booking => {
     if (booking.date !== date) return false;
@@ -476,23 +487,30 @@ const startDate = new Date(`${newBooking.date}T${newBooking.time}:00`);
 const endDate = getEndDateTime(newBooking.date, newBooking.time, newBooking.service);
 
 const event = await calendar.events.insert({
-      calendarId: "primary",
-      resource: {
-        summary: newBooking.service,
-        description:
-          "Klients: " + newBooking.name + "\n" +
-          "Email: " + newBooking.email + "\n" +
-          "Telefons: " + newBooking.phone,
-        start: {
-          dateTime: startDate.toISOString(),
-          timeZone: "Europe/Riga"
-        },
-        end: {
-          dateTime: endDate.toISOString(),
-          timeZone: "Europe/Riga"
-        }
-      }
-    });
+  calendarId: "primary",
+  sendUpdates: "all",
+  resource: {
+    summary: newBooking.service,
+    description:
+      "Klients: " + newBooking.name + "\n" +
+      "Email: " + newBooking.email + "\n" +
+      "Telefons: " + newBooking.phone + "\n" +
+      "Sarunas mērķis: " + (newBooking.goal || "-"),
+
+    attendees: [
+      { email: newBooking.email }
+    ],
+
+    start: {
+      dateTime: startDate.toISOString(),
+      timeZone: "Europe/Riga"
+    },
+    end: {
+      dateTime: endDate.toISOString(),
+      timeZone: "Europe/Riga"
+    }
+  }
+});
 
     const savedBooking = {
   ...newBooking,
