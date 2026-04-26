@@ -354,15 +354,29 @@ const googleBusy = await getGoogleBusyIntervals(date);
 
     const bookedDuration = getServiceDurationByName(booking.service);
     const bookingStart = getDateTime(booking.date, booking.time);
-    const bookingEnd = new Date(bookingStart.getTime() + bookedDuration * 60 * 1000);
+    const BUFFER_MINUTES = 15;
+    const bookingEnd = new Date(
+        bookingStart.getTime() + (bookedDuration + BUFFER_MINUTES) * 60 * 1000
+    );
 
     return overlaps(slotStart, slotEnd, bookingStart, bookingEnd);
   });
 
   // 2. Google Calendar
-  const hasGoogleConflict = googleBusy.some(event => {
-    return overlaps(slotStart, slotEnd, event.start, event.end);
-  });
+const BUFFER_MINUTES = 15;
+
+const hasGoogleConflict = googleBusy.some(event => {
+  const eventStart = new Date(event.start);
+  const eventEnd = new Date(event.end);
+
+  const eventEndWithBuffer = new Date(
+    eventEnd.getTime() + BUFFER_MINUTES * 60 * 1000
+  );
+
+  return overlaps(slotStart, slotEnd, eventStart, eventEndWithBuffer);
+});
+
+
 
   return !hasLocalConflict && !hasGoogleConflict;
 });
