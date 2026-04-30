@@ -217,7 +217,7 @@ app.get("/kristina/services", (req, res) => {
   }
 });
 
-app.put("/services/:id", (req, res) => {
+app.put(["/services/:id", "/kristina/services/:id"], (req, res) => {
   try {
     const serviceId = Number(req.params.id);
     const { name, duration } = req.body;
@@ -389,7 +389,7 @@ const hasGoogleConflict = googleBusy.some(event => {
   }
 });
 
-app.put("/availability/:index", (req, res) => {
+app.put(["/availability/:index", "/kristina/availability/:index"], (req, res) => {
   try {
     const index = Number(req.params.index);
     const { serviceId, weekday, from, to, active } = req.body;
@@ -515,6 +515,13 @@ const event = await calendar.events.insert({
       { email: newBooking.email }
     ],
 
+    reminders: {
+    useDefault: false,
+    overrides: [
+     { method: "email", minutes: 1440 },
+     { method: "popup", minutes: 60 }
+    ]
+  },
     start: {
       dateTime: startDate.toISOString(),
       timeZone: "Europe/Riga"
