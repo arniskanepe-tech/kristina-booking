@@ -20,7 +20,9 @@
   "homepage": "https://github.com/arniskanepe-tech/kristina-booking#readme",
   "dependencies": {
     "@google-cloud/local-auth": "^3.0.1",
+    "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "googleapis": "^171.4.0"
+    "googleapis": "^171.4.0",
+    "nodemailer": "^8.0.7"
   }
 }

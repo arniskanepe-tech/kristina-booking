@@ -1,12 +1,13 @@
+require("dotenv").config();
+
 const express = require("express");
 const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
 const { authenticate } = require("@google-cloud/local-auth");
 const { google } = require("googleapis");
-
+const nodemailer = require("nodemailer");
 const app = express();
-
 app.use(express.json());
 
 let frontendPath = "/var/www/kristina/couch";
@@ -348,19 +349,27 @@ const googleBusy = await getGoogleBusyIntervals(date);
     return false;
 
   }
-  // 1. Lokālie bookingi
-  const hasLocalConflict = bookings.some(booking => {
-    if (booking.date !== date) return false;
 
-    const bookedDuration = getServiceDurationByName(booking.service);
-    const bookingStart = getDateTime(booking.date, booking.time);
-    const BUFFER_MINUTES = 15;
-    const bookingEnd = new Date(
-        bookingStart.getTime() + (bookedDuration + BUFFER_MINUTES) * 60 * 1000
-    );
+// 1. Lokālie bookingi
+const hasLocalConflict = bookings.some(booking => {
+  if (booking.status === "cancelled") return false;
+  if (booking.date !== date) return false;
 
-    return overlaps(slotStart, slotEnd, bookingStart, bookingEnd);
-  });
+  const bookedDuration = getServiceDurationByName(booking.service);
+  const bookingStart = getDateTime(booking.date, booking.time);
+  const BUFFER_MINUTES = 15;
+
+  const bookingStartWithBuffer = new Date(
+    bookingStart.getTime() - BUFFER_MINUTES * 60 * 1000
+  );
+
+  const bookingEnd = new Date(
+    bookingStart.getTime() + (bookedDuration + BUFFER_MINUTES) * 60 * 1000
+  );
+
+  return overlaps(slotStart, slotEnd, bookingStartWithBuffer, bookingEnd);
+});
+
 
   // 2. Google Calendar
 const BUFFER_MINUTES = 15;
@@ -369,11 +378,15 @@ const hasGoogleConflict = googleBusy.some(event => {
   const eventStart = new Date(event.start);
   const eventEnd = new Date(event.end);
 
+const eventStartWithBuffer = new Date(
+  eventStart.getTime() - BUFFER_MINUTES * 60 * 1000
+);
+
   const eventEndWithBuffer = new Date(
     eventEnd.getTime() + BUFFER_MINUTES * 60 * 1000
   );
 
-  return overlaps(slotStart, slotEnd, eventStart, eventEndWithBuffer);
+return overlaps(slotStart, slotEnd, eventStartWithBuffer, eventEndWithBuffer);
 });
 
 
@@ -486,8 +499,120 @@ app.delete(["/bookings/:index", "/kristina/bookings/:index"], async (req, res) =
   }
 });
 
+app.get(["/cancel/:token", "/kristina/cancel/:token"], async (req, res) => {
+  try {
+    const { token } = req.params;
+    const bookings = loadBookings();
+
+    const bookingIndex = bookings.findIndex(b => b.cancelToken === token);
+
+    if (bookingIndex === -1) {
+      return res.status(404).send("Rezervācija nav atrasta vai jau ir atcelta.");
+    }
+
+    const booking = bookings[bookingIndex];
+
+    if (booking.status === "cancelled") {
+      return res.send("Šī rezervācija jau ir atcelta.");
+    }
+
+    if (booking.eventId) {
+      try {
+        const auth = await authorize();
+        const calendar = google.calendar({ version: "v3", auth });
+
+        await calendar.events.delete({
+          calendarId: "primary",
+          eventId: booking.eventId
+        });
+      } catch (calendarErr) {
+        console.error("Kļūda dzēšot Google Calendar event:", calendarErr);
+      }
+    }
+
+    bookings[bookingIndex] = {
+      ...booking,
+      status: "cancelled",
+      cancelledAt: new Date().toISOString(),
+      eventId: null
+    };
+
+    saveBookings(bookings);
+
+res.send(`
+<!DOCTYPE html>
+<html lang="lv">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rezervācija atcelta</title>
+  <link rel="stylesheet" href="/kristina/assets/css/cancel.css">
+</head>
+<body>
+  <main class="cancel-page">
+    <section class="cancel-card">
+      <h1>Saruna ir atcelta</h1>
+      <p>
+        Nekas — aprunāsimies citreiz. Kad būsi gatavs, vari izvēlēties citu laiku.
+      </p>
+
+      <div class="cancel-actions">
+        <a href="/kristina/" class="cancel-btn cancel-btn-primary">Uz sākumlapu</a>
+        <a href="/kristina/#konsultacijas" class="cancel-btn cancel-btn-secondary">Izvēlēties citu laiku</a>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
+`);
+
+  } catch (err) {
+    console.error("Cancel error:", err);
+    res.status(500).send("Neizdevās atcelt rezervāciju.");
+  }
+});
 
 // booking route
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS
+  }
+});
+
+async function sendBookingNotification(booking, meetLink) {
+  try {
+    await transporter.sendMail({
+      from: `"Kristīna Kaņepe" <${process.env.SMTP_USER}>`,
+      to: "kristina.kanepe@gmail.com",
+      subject: `Jauna rezervācija — ${booking.service}`,
+      text:
+`Jauna rezervācija
+
+Pakalpojums: ${booking.service}
+Datums: ${booking.date}
+Laiks: ${booking.time}
+
+Klients: ${booking.name}
+E-pasts: ${booking.email}
+Telefons: ${booking.phone}
+
+Sarunas mērķis:
+${booking.goal || "-"}
+
+Google Meet:
+${meetLink || "-"}
+
+`
+    });
+
+    console.log("Notification email sent");
+  } catch (err) {
+    console.error("Email send error:", err);
+  }
+}
+
 app.post(["/booking", "/kristina/booking"], async (req, res) => {
   try {
     const newBooking = req.body;
@@ -496,24 +621,52 @@ app.post(["/booking", "/kristina/booking"], async (req, res) => {
 
 const auth = await authorize();
 const calendar = google.calendar({ version: "v3", auth });
-
+const cancelToken = Math.random().toString(36).substring(2, 12);
 const startDate = new Date(`${newBooking.date}T${newBooking.time}:00`);
 const endDate = getEndDateTime(newBooking.date, newBooking.time, newBooking.service);
 
 const event = await calendar.events.insert({
   calendarId: "primary",
   sendUpdates: "all",
+  conferenceDataVersion: 1,
   resource: {
     summary: newBooking.service,
-    description:
-      "Klients: " + newBooking.name + "\n" +
-      "Email: " + newBooking.email + "\n" +
-      "Telefons: " + newBooking.phone + "\n" +
-      "Sarunas mērķis: " + (newBooking.goal || "-"),
+description:
+  "Labdien!\n\n" +
 
+  "Paldies par uzticēšanos un pieteikumu uz sesiju.\n\n" +
+
+  "Mēdz teikt, ka lielas pārmaiņas sākas brīdī, kad mēs uzdrīkstamies apstāties un pa īstam ieklausīties sevī. Man būs patiess prieks būt Tev līdzās šajā procesā, palīdzot sakārtot domas un ieraudzīt situāciju no cita, plašāka skatu punkta.\n\n" +
+
+  "Mūsu tikšanās ir apstiprināta.\n\n" +
+
+  "Ja Tev līdz tam rodas kādi jautājumi vai ir kas savarīgs, ko vēlies precizēt, droši dod ziņu.\n\n" +
+
+  "Šajā e-pastā esmu pievienojusi linku uz Google Meet platformu, kur notiks saruna.\n\n" +
+
+  "Uz tikšanos,\n\n" +
+  "Kristīna Kaņepe\n\n" +
+  "Tālr.26465779\n\n" +
+
+  "-----------------------------------\n\n" +
+
+  "Klients: " + newBooking.name + "\n" +
+  "E-pasts: " + newBooking.email + "\n" +
+  "Telefons: " + newBooking.phone + "\n" +
+  "Sarunas mērķis: " + (newBooking.goal || "-") + "\n\n" +
+
+  "-----------------------------------\n\n" +
+
+  "Ja nepieciešams atcelt rezervāciju:\n" +
+  "http://185.219.156.43/kristina/cancel/" + cancelToken,
     attendees: [
       { email: newBooking.email }
     ],
+conferenceData: {
+  createRequest: {
+    requestId: cancelToken
+  }
+},
 
     reminders: {
     useDefault: false,
@@ -533,10 +686,12 @@ const event = await calendar.events.insert({
   }
 });
 
-    const savedBooking = {
+const savedBooking = {
   ...newBooking,
   createdAt: new Date().toISOString(),
-  eventId: event.data.id || null
+  eventId: event.data.id || null,
+  cancelToken,
+  status: "active"
 };
 
 bookings.push(savedBooking);
@@ -544,6 +699,10 @@ saveBookings(bookings);
 
 console.log("Saglabāts booking:", savedBooking);
 console.log("Event added to Google Calendar");
+await sendBookingNotification(
+  savedBooking,
+  event.data.hangoutLink
+);
 
 res.json({
   status: "ok",
