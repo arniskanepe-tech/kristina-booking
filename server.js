@@ -453,6 +453,135 @@ app.get(["/bookings", "/kristina/bookings"], (req, res) => {
   }
 });
 
+app.get(["/crm/clients", "/kristina/crm/clients"], (req, res) => {
+  try {
+    const bookings = loadBookings();
+
+    const clientsMap = {};
+
+    bookings.forEach((booking) => {
+      if (!booking.email) return;
+
+      const email = booking.email.trim().toLowerCase();
+
+      if (!clientsMap[email]) {
+        clientsMap[email] = {
+          email,
+          name: booking.name || "",
+          phone: booking.phone || "",
+          bookingsCount: 0,
+          lastBookingDate: booking.date || "",
+          lastService: booking.service || "",
+          status: booking.status || "active"
+        };
+      }
+
+      clientsMap[email].bookingsCount += 1;
+
+      // jaunākā rezervācija
+      if (
+        booking.date &&
+        booking.date > clientsMap[email].lastBookingDate
+      ) {
+        clientsMap[email].lastBookingDate = booking.date;
+        clientsMap[email].lastService = booking.service || "";
+        clientsMap[email].status = booking.status || "active";
+      }
+    });
+
+    const clients = Object.values(clientsMap)
+      .sort((a, b) =>
+        (b.lastBookingDate || "").localeCompare(a.lastBookingDate || "")
+      );
+
+    res.json(clients);
+
+  } catch (err) {
+    console.error("CRM clients error:", err);
+
+    res.status(500).json({
+      error: "Neizdevās ielādēt CRM klientus"
+    });
+  }
+});
+
+app.get(["/crm/client-data", "/kristina/crm/client-data"], async (req, res) => {
+  try {
+    const filePath = path.join(__dirname, "data", "crm-clients.json");
+
+    const raw = await fsp.readFile(filePath, "utf8");
+
+    const data = JSON.parse(raw || "[]");
+
+    res.json(data);
+
+  } catch (err) {
+    console.error("CRM client-data error:", err);
+
+    res.status(500).json({
+      error: "Neizdevās nolasīt CRM klientu datus"
+    });
+  }
+});
+
+app.post(["/crm/client-data", "/kristina/crm/client-data"], async (req, res) => {
+  try {
+    const filePath = path.join(__dirname, "data", "crm-clients.json");
+    const incoming = req.body;
+
+    if (!incoming.email) {
+      return res.status(400).json({ error: "Email obligāts" });
+    }
+
+    const email = incoming.email.trim().toLowerCase();
+
+    let data = [];
+
+    try {
+      const raw = await fsp.readFile(filePath, "utf8");
+      data = JSON.parse(raw || "[]");
+    } catch (readErr) {
+      data = [];
+    }
+
+    const existingIndex = data.findIndex(
+      item => String(item.email || "").trim().toLowerCase() === email
+    );
+
+    const savedClient = {
+      ...incoming,
+      email,
+      updatedAt: new Date().toISOString()
+    };
+
+    if (existingIndex >= 0) {
+      data[existingIndex] = {
+        ...data[existingIndex],
+        ...savedClient
+      };
+    } else {
+      data.push({
+        ...savedClient,
+        createdAt: new Date().toISOString()
+      });
+    }
+
+    await fsp.writeFile(filePath, JSON.stringify(data, null, 2), "utf8");
+
+    res.json({
+      status: "ok",
+      client: savedClient
+    });
+
+  } catch (err) {
+    console.error("CRM client-data save error:", err);
+    res.status(500).json({ error: "Neizdevās saglabāt CRM klientu datus" });
+  }
+});
+
+
+
+
 app.delete(["/bookings/:index", "/kristina/bookings/:index"], async (req, res) => {
   try {
     const index = Number(req.params.index);
