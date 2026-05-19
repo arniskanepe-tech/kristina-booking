@@ -119,6 +119,55 @@ function saveBookings(bookings) {
   fs.writeFileSync(BOOKINGS_PATH, JSON.stringify(bookings, null, 2));
 }
 
+const CRM_EVENTS_PATH = path.join(
+  __dirname,
+  "data",
+  "crm-events.json"
+);
+
+function ensureCrmEventsFile() {
+
+  if (!fs.existsSync(CRM_EVENTS_PATH)) {
+
+    fs.writeFileSync(
+      CRM_EVENTS_PATH,
+      "[]"
+    );
+  }
+}
+
+function loadCrmEvents() {
+
+  ensureCrmEventsFile();
+
+  const data =
+    fs.readFileSync(CRM_EVENTS_PATH, "utf8");
+
+  return JSON.parse(data);
+}
+
+function saveCrmEvents(events) {
+
+  fs.writeFileSync(
+    CRM_EVENTS_PATH,
+    JSON.stringify(events, null, 2)
+  );
+}
+
+function addCrmEvent(event) {
+
+  const events = loadCrmEvents();
+
+  events.unshift({
+    id: Date.now(),
+    createdAt: new Date().toISOString(),
+    ...event
+  });
+
+  saveCrmEvents(events);
+}
+
+
 function getServiceByName(serviceName) {
   const services = loadServices();
   return services.find(service => service.name === serviceName);
@@ -524,6 +573,22 @@ app.get(["/crm/client-data", "/kristina/crm/client-data"], async (req, res) => {
   }
 });
 
+app.get(["/crm/events", "/kristina/crm/events"], (req, res) => {
+  try {
+    const events = loadCrmEvents();
+
+    res.json(events);
+
+  } catch (err) {
+    console.error("CRM events error:", err);
+
+    res.status(500).json({
+      error: "Neizdevās ielādēt CRM notikumus"
+    });
+  }
+});
+
+
 app.post(["/crm/client-data", "/kristina/crm/client-data"], async (req, res) => {
   try {
     const filePath = path.join(__dirname, "data", "crm-clients.json");
@@ -615,6 +680,33 @@ app.delete(["/bookings/:index", "/kristina/bookings/:index"], async (req, res) =
     bookings.splice(index, 1);
     saveBookings(bookings);
 
+try {
+  addCrmEvent({
+    type: "booking_deleted",
+    email: deletedBooking.email,
+    name: deletedBooking.name,
+    phone: deletedBooking.phone,
+    service: deletedBooking.service,
+    date: deletedBooking.date,
+    time: deletedBooking.time,
+    goal: deletedBooking.goal || "",
+    bookingId:
+      deletedBooking.eventId ||
+      deletedBooking.cancelToken,
+    eventId: deletedBooking.eventId || null,
+    cancelToken:
+      deletedBooking.cancelToken || null
+  });
+} catch (eventErr) {
+  console.error(
+    "CRM delete event save error:",
+    eventErr
+  );
+}
+
+
+
+
     res.json({
       status: "ok",
       deletedBooking
@@ -628,12 +720,17 @@ app.delete(["/bookings/:index", "/kristina/bookings/:index"], async (req, res) =
   }
 });
 
+
+
+
 app.get(["/cancel/:token", "/kristina/cancel/:token"], async (req, res) => {
   try {
     const { token } = req.params;
     const bookings = loadBookings();
 
-    const bookingIndex = bookings.findIndex(b => b.cancelToken === token);
+    const bookingIndex = bookings.findIndex(
+      b => b.cancelToken === token
+    );
 
     if (bookingIndex === -1) {
       return res.status(404).send("Rezervācija nav atrasta vai jau ir atcelta.");
@@ -668,7 +765,25 @@ app.get(["/cancel/:token", "/kristina/cancel/:token"], async (req, res) => {
 
     saveBookings(bookings);
 
-res.send(`
+    try {
+      addCrmEvent({
+        type: "booking_cancelled",
+        email: booking.email,
+        name: booking.name,
+        phone: booking.phone,
+        service: booking.service,
+        date: booking.date,
+        time: booking.time,
+        goal: booking.goal || "",
+        bookingId: booking.eventId || booking.cancelToken,
+        eventId: booking.eventId || null,
+        cancelToken: booking.cancelToken
+      });
+    } catch (eventErr) {
+      console.error("CRM cancel event save error:", eventErr);
+    }
+
+    res.send(`
 <!DOCTYPE html>
 <html lang="lv">
 <head>
@@ -694,9 +809,9 @@ res.send(`
 </body>
 </html>
 `);
-
   } catch (err) {
     console.error("Cancel error:", err);
+
     res.status(500).send("Neizdevās atcelt rezervāciju.");
   }
 });
@@ -825,6 +940,26 @@ const savedBooking = {
 
 bookings.push(savedBooking);
 saveBookings(bookings);
+
+try {
+  addCrmEvent({
+    type: "booking_created",
+    email: savedBooking.email,
+    name: savedBooking.name,
+    phone: savedBooking.phone,
+    service: savedBooking.service,
+    date: savedBooking.date,
+    time: savedBooking.time,
+    goal: savedBooking.goal || "",
+    bookingId: savedBooking.eventId || savedBooking.cancelToken,
+    eventId: savedBooking.eventId || null,
+    cancelToken: savedBooking.cancelToken
+  });
+} catch (eventErr) {
+  console.error("CRM event save error:", eventErr);
+}
+
+
 
 console.log("Saglabāts booking:", savedBooking);
 console.log("Event added to Google Calendar");
