@@ -588,6 +588,173 @@ app.get(["/crm/events", "/kristina/crm/events"], (req, res) => {
   }
 });
 
+app.post(["/crm/events", "/kristina/crm/events"], (req, res) => {
+  try {
+
+    const incoming = req.body;
+
+    if (!incoming.email) {
+      return res.status(400).json({
+        error: "Email obligāts"
+      });
+    }
+
+    addCrmEvent({
+      type: incoming.type || "note",
+      email: incoming.email,
+      text: incoming.text || "",
+      createdBy: incoming.createdBy || "crm",
+      service: incoming.service || "",
+      goal: incoming.goal || ""
+    });
+
+    res.json({
+      status: "ok"
+    });
+
+  } catch (err) {
+
+    console.error("CRM event save error:", err);
+
+    res.status(500).json({
+      error: "Neizdevās saglabāt CRM notikumu"
+    });
+  }
+});
+
+app.patch(["/crm/events/:id", "/kristina/crm/events/:id"], (req, res) => {
+  try {
+
+    const eventId = Number(req.params.id);
+    const { text, hidden } = req.body;
+
+    const events = loadCrmEvents();
+
+    const eventIndex = events.findIndex(
+      event => Number(event.id) === eventId
+    );
+
+    if (eventIndex === -1) {
+      return res.status(404).json({
+        error: "CRM notikums nav atrasts"
+      });
+    }
+
+events[eventIndex] = {
+  ...events[eventIndex],
+
+  ...(typeof text === "string"
+    ? { text }
+    : {}),
+
+  ...(typeof hidden === "boolean"
+    ? { hidden }
+    : {}),
+
+  updatedAt: new Date().toISOString()
+};
+
+    saveCrmEvents(events);
+
+    res.json({
+      status: "ok",
+      event: events[eventIndex]
+    });
+
+  } catch (err) {
+
+    console.error("CRM event update error:", err);
+
+    res.status(500).json({
+      error: "Neizdevās atjaunot CRM notikumu"
+    });
+  }
+});
+
+app.delete(["/crm/client/:email", "/kristina/crm/client/:email"], async (req, res) => {
+  try {
+    const email = String(req.params.email || "").trim().toLowerCase();
+
+    if (!email) {
+      return res.status(400).json({
+        error: "Email obligāts"
+      });
+    }
+
+    const bookings = loadBookings();
+    const crmEvents = loadCrmEvents();
+
+    const crmClientsPath = path.join(__dirname, "data", "crm-clients.json");
+
+    let crmClients = [];
+
+    try {
+      const rawClients = await fsp.readFile(crmClientsPath, "utf8");
+      crmClients = JSON.parse(rawClients || "[]");
+    } catch (err) {
+      crmClients = [];
+    }
+
+    const deletedBookings = bookings.filter(
+      booking => String(booking.email || "").trim().toLowerCase() === email
+    );
+
+    for (const booking of deletedBookings) {
+      if (booking.eventId) {
+        try {
+          const auth = await authorize();
+          const calendar = google.calendar({ version: "v3", auth });
+
+          await calendar.events.delete({
+            calendarId: "primary",
+            eventId: booking.eventId
+          });
+        } catch (calendarErr) {
+          console.error("Kļūda dzēšot klienta Google Calendar event:", calendarErr);
+        }
+      }
+    }
+
+    const remainingBookings = bookings.filter(
+      booking => String(booking.email || "").trim().toLowerCase() !== email
+    );
+
+    const remainingEvents = crmEvents.filter(
+      event => String(event.email || "").trim().toLowerCase() !== email
+    );
+
+    const remainingClients = crmClients.filter(
+      client => String(client.email || "").trim().toLowerCase() !== email
+    );
+
+    saveBookings(remainingBookings);
+    saveCrmEvents(remainingEvents);
+
+    await fsp.writeFile(
+      crmClientsPath,
+      JSON.stringify(remainingClients, null, 2),
+      "utf8"
+    );
+
+    res.json({
+      status: "ok",
+      deleted: {
+        bookings: deletedBookings.length,
+        events: crmEvents.length - remainingEvents.length,
+        clients: crmClients.length - remainingClients.length
+      }
+    });
+
+  } catch (err) {
+    console.error("CRM client delete error:", err);
+
+    res.status(500).json({
+      error: "Neizdevās dzēst klientu"
+    });
+  }
+});
+
+
 
 app.post(["/crm/client-data", "/kristina/crm/client-data"], async (req, res) => {
   try {
