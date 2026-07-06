@@ -17,6 +17,13 @@ if (!fs.existsSync(frontendPath)) {
 frontendPath = path.join(__dirname, "..", "kristina-couch");
 }
 
+
+app.get("/kristina/crm.html", (req, res) => {
+  res.sendStatus(404);
+});
+app.use(["/crm", "/kristina/crm"], (req, res) => {
+  res.sendStatus(404);
+});
 app.use("/kristina", express.static(frontendPath));
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
