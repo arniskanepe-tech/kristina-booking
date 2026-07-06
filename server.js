@@ -10,6 +10,27 @@ const nodemailer = require("nodemailer");
 const app = express();
 app.use(express.json());
 
+const ADMIN_USER = process.env.ADMIN_USER || "kristina";
+const ADMIN_PASS = process.env.ADMIN_PASS || "CHANGE_ME_ADMIN_PASSWORD";
+
+function requireAdmin(req, res, next) {
+  const auth = req.headers.authorization || "";
+  if (!auth.startsWith("Basic ")) {
+    res.setHeader("WWW-Authenticate", 'Basic realm="Kristina Admin"');
+    return res.sendStatus(401);
+  }
+
+  const decoded = Buffer.from(auth.split(" ")[1], "base64").toString("utf8");
+  const [user, pass] = decoded.split(":");
+
+  if (user === ADMIN_USER && pass === ADMIN_PASS) {
+    return next();
+  }
+
+  res.setHeader("WWW-Authenticate", 'Basic realm="Kristina Admin"');
+  return res.sendStatus(401);
+}
+
 let frontendPath = "/var/www/kristina/couch";
 
 // ja servera ceļš neeksistē → izmanto lokālo
@@ -17,7 +38,9 @@ if (!fs.existsSync(frontendPath)) {
 frontendPath = path.join(__dirname, "..", "kristina-couch");
 }
 
-
+app.get("/kristina/admin.html", requireAdmin, (req, res) => {
+  res.sendFile(path.join(frontendPath, "admin.html"));
+});
 app.get("/kristina/crm.html", (req, res) => {
   res.sendStatus(404);
 });
@@ -280,7 +303,7 @@ app.get("/kristina/services", (req, res) => {
   }
 });
 
-app.put(["/services/:id", "/kristina/services/:id"], (req, res) => {
+app.put(["/services/:id", "/kristina/services/:id"], requireAdmin, (req, res) => {
   try {
     const serviceId = Number(req.params.id);
     const { name, duration } = req.body;
@@ -327,7 +350,7 @@ app.put(["/services/:id", "/kristina/services/:id"], (req, res) => {
 
 
 
-app.get(["/availability", "/kristina/availability"], (req, res) => {
+app.get(["/availability", "/kristina/availability"], requireAdmin, (req, res) => {
   try {
     const availability = loadAvailability();
     const services = loadServices();
@@ -464,7 +487,7 @@ return overlaps(slotStart, slotEnd, eventStartWithBuffer, eventEndWithBuffer);
   }
 });
 
-app.put(["/availability/:index", "/kristina/availability/:index"], (req, res) => {
+app.put(["/availability/:index", "/kristina/availability/:index"], requireAdmin, (req, res) => {
   try {
     const index = Number(req.params.index);
     const { serviceId, weekday, from, to, active } = req.body;
@@ -498,7 +521,7 @@ app.put(["/availability/:index", "/kristina/availability/:index"], (req, res) =>
 });
 
 // admin rezervāciju saraksts
-app.get(["/bookings", "/kristina/bookings"], (req, res) => {
+app.get(["/bookings", "/kristina/bookings"], requireAdmin, (req, res) => {
   try {
     const bookings = loadBookings().map((booking, index) => ({
       ...booking,
@@ -824,10 +847,7 @@ app.post(["/crm/client-data", "/kristina/crm/client-data"], async (req, res) => 
   }
 });
 
-
-
-
-app.delete(["/bookings/:index", "/kristina/bookings/:index"], async (req, res) => {
+app.delete(["/bookings/:index", "/kristina/bookings/:index"], requireAdmin,  async (req, res) => {
   try {
     const index = Number(req.params.index);
     const bookings = loadBookings();
