@@ -161,7 +161,7 @@ function saveCrmEvents(events) {
   );
 }
 
-function addCrmEvent(event) {
+/*function addCrmEvent(event) {
 
   const events = loadCrmEvents();
 
@@ -172,8 +172,14 @@ function addCrmEvent(event) {
   });
 
   saveCrmEvents(events);
-}
+}*/
 
+function addCrmEvent(event) {
+  // CRM pagaidām ir atslēgts.
+  // Booking/admin/Google Calendar turpina strādāt,
+  // bet jauni CRM notikumi netiek krāti.
+  return;
+}
 
 function getServiceByName(serviceName) {
   const services = loadServices();
